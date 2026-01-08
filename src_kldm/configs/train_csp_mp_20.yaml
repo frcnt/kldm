@@ -1,0 +1,164 @@
+seed: 42
+project: "kldm"
+tags:
+  - mp_20
+  - csp
+train: true
+
+log_dir: ${oc.env:LOG_PATH}
+output_dir: ${hydra:runtime.output_dir}
+work_dir: ${hydra:runtime.cwd}
+
+data_path: ${oc.env:DATA_PATH}/mp_20/
+data_name: "mp_20"
+
+
+hidden_dim: 512
+time_dim: 256
+num_layers: 6
+
+
+# normalization angles and lattice parameters
+angles_loc_scale:
+  - 0.0
+  - 0.35
+lengths_loc_scale: ${data_path}/train_loc_scale.json
+
+loss_weights:
+  v: 1.
+  l: 1.
+
+
+monitor_metric: "val/match_rate"
+val_every_n_epochs: 100
+
+
+datamodule:
+  _target_: src_kldm.data.datamodule.DataModule
+  train_path: ${data_path}/train.pt
+  val_path: ${data_path}/val.pt
+  test_path: ${data_path}/test.pt
+  train_batch_size: 256
+  val_batch_size: 256
+  num_val_subset: 1024
+  test_batch_size: 256
+  num_workers: 1
+  pin_memory: true
+  transform:
+    _target_: torch_geometric.transforms.Compose
+    transforms:
+      - _target_: src_kldm.data.transforms.FullyConnectedGraph
+      - _target_: src_kldm.data.transforms.ContinuousIntervalLengths
+        lengths_loc_scale: ${lengths_loc_scale}
+      - _target_: src_kldm.data.transforms.ContinuousIntervalAngles
+        angles_loc_scale: ${angles_loc_scale}
+      - _target_: src_kldm.data.transforms.ConcatFeatures
+        in_keys:
+          - "lengths"
+          - "angles"
+        out_key: "l"
+
+
+lit_module:
+  _target_: src_kldm.lit.module.LitKLDM
+  model:
+    _target_: src_kldm.model.kldm.KLDM
+    net:
+      _target_: src_kldm.nn.arch.CSPVNet
+      hidden_dim: ${hidden_dim}
+      time_dim: ${time_dim}
+      num_layers: ${num_layers}
+      num_freqs: 128
+      ln: true
+      smooth: false # CSP
+      pred_h: false # CSP
+      zero_cog: true
+
+    diffusion_v:
+      _target_: src_kldm.model.tdm.TDM
+
+    diffusion_l:
+      _target_: src_kldm.model.continuous.ContinuousDiffusion
+      sde:
+        _target_: src_kldm.model.continuous.VPSDE
+        schedule:
+          _target_: src_kldm.model.continuous.LinearSchedule
+      parameterization: "x0"
+      dim: 6
+  task: "csp"
+  transform_lengths:
+    _target_: src_kldm.data.transforms.ContinuousIntervalLengths
+    lengths_loc_scale: ${lengths_loc_scale}
+  transform_angles:
+    _target_: src_kldm.data.transforms.ContinuousIntervalAngles
+    angles_loc_scale: ${angles_loc_scale}
+  lr: 1e-3
+  with_ema: true
+  ema_decay: 0.999
+  ema_start: 500
+  loss_weights: ${loss_weights}
+  metrics:
+    _target_: src_kldm.metrics.csp.CSPMetrics
+
+  sampling_kwargs:
+    val:
+      force_ema: false
+      method: "em"
+      n_steps: 1000
+    test:
+      force_ema: true
+      method: "pc"
+      n_steps: 1000
+
+callbacks:
+  model_checkpoint:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+
+    dirpath: ${output_dir}/checkpoints
+    filename: "epoch_{epoch:03d}"
+    monitor: ${monitor_metric}
+    verbose: False
+    save_last: true
+    save_top_k: 3
+    mode: "max"
+    auto_insert_metric_name: true
+    save_weights_only: false
+    every_n_epochs: ${val_every_n_epochs}
+    save_on_train_epoch_end: true
+
+  log_sampled_atoms:
+    _target_: src_kldm.utils.callback.LogSampledAtomsCallback
+    dirpath: ${output_dir}/samples
+    save_atoms: true
+    num_log_wandb: 25
+
+
+logger:
+  wandb:
+    _target_: pytorch_lightning.loggers.wandb.WandbLogger
+    save_dir: ${output_dir}
+    offline: False
+    id: null
+    anonymous: null
+    project: ${project}
+    log_model: False
+    prefix: ""
+    group: ""
+    tags: ${tags}
+    job_type: ""
+
+
+
+trainer:
+  _target_: pytorch_lightning.Trainer
+  accelerator: auto
+  devices: 1
+  max_epochs: -1
+  check_val_every_n_epoch: ${val_every_n_epochs}
+  num_sanity_val_steps: 0
+
+
+hydra:
+  run:
+    dir: ${log_dir}/${data_name}/runs/${now:%Y-%m-%d}_${now:%H-%M-%S}
+
