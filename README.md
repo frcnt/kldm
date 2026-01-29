@@ -57,7 +57,7 @@ A trained CSP model can be evaluated by running a command similar to,
 export CKPT_PATH="path/to/file.ckpt"
 
 kldm-evaluate-csp \
---ckpt_path $CKPT_PATH \
+--checkpoint_path $CKPT_PATH \
 --n 10 \
 --sampling_kwargs "{'force_ema': True, 'method': 'pc', 'n_steps': 1000, 'tf': 0.0, 'correct_pos': True}"
 ```
@@ -71,7 +71,7 @@ at the root of `CKPT_PATH`.
 export CKPT_PATH="path/to/file.ckpt"
 
 kldm-generate-csp \
---ckpt_path $CKPT_PATH \
+--checkpoint_path $CKPT_PATH \
 --formulas "[LiFePO4, Li3Co3O6]" \
 --n_samples_per_formula 5 \
 --sampling_kwargs "{'force_ema': True, 'method': 'pc', 'n_steps': 1000, 'correct_pos': True}"
@@ -84,7 +84,6 @@ The script saves samples in a directory called `gen` at the root of `CKPT_PATH`.
 If you find this work useful, please consider citing our paper:
 
 ```
-
 @inproceedings{
 cornet2025kinetic,
 title={Kinetic Langevin Diffusion for Crystalline Materials Generation},
